@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>three.js webgl - lines - splines</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            background-color: #ffffff;
+            margin: 0px;
+            overflow: hidden;
+        }
+        a {
+            color: #0078ff;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            color: #ffffff;
+            padding: 5px;
+            font-family: Monospace;
+            font-size: 13px;
+            text-align: center;
+            z-index: 100;
+        }
+        a {
+            color: orange;
+            text-decoration: none;
+        }
+        a:hover {
+            color: #0080ff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <audio style= "display:none;" id="myAudio1" src = "Sand.wav" controls loop>
+    <a href = "Sand.wav">DoYou.ogg</a>
+  </audio>
+  
+  <audio style= "display:none;" id="myAudio2" src = "Skin.wav" controls loop>
+    <a href = "Skin.wav">DoYou.ogg</a>
+  </audio>
+  
+  <audio style= "display:none;" id="myAudio3" src = "whisper.wav" controls loop>
+    <a href = "whisper.wav">DoYou.ogg</a>
+  </audio>
+
+    <script src="three.min.js"></script>
+
+    <script src="hilbert3D.js"></script>
+
+    <script src="Detector.js"></script>
+    <script src="stats.min.js"></script>
+    <script src="//code.jquery.com/jquery-1.11.2.min.js"></script>
+    <script src="//code.jquery.com/jquery-migrate-1.2.1.min.js"></script>
+
+    <script>
+        var xmlhttp = new XMLHttpRequest();
+        var url = "allTheLines.json";
+
+        xmlhttp.onreadystatechange = function() {
+            if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                var myArr = JSON.parse(xmlhttp.responseText);
+
+                init(myArr);
+                animate();
+            }
+        }
+        xmlhttp.open("GET", url, true);
+        xmlhttp.send();
+        if (!Detector.webgl) Detector.addGetWebGLMessage();
+
+        var mouseX = 0,
+            mouseY = 0,
+
+            windowHalfX = window.innerWidth / 2,
+            windowHalfY = window.innerHeight / 2,
+            camera, cameraFollow,cameraFollowHelper, activeCamera, scene, renderer, material, raycaster, currentIntersected,
+            arrayOfAllLines, count, currentlyBeingPlayed, scaledCurrentlyBeingPlayed, stopSetInterval, spherePlayHead, currentAudio;
+
+		var allAudio = []; 
+        var mouse = new THREE.Vector2();
+        arrayOfAllLines = [];
+
+        function init(myArr) {
+
+			for (var i = 0; i<3; i++){
+				var string =  "myAudio" + (i+1);
+				var audio = document.getElementById(string);
+				allAudio.push(audio); 
+			}
+			
+			spherePlayHead = new THREE.Mesh( new THREE.SphereGeometry( 2, 16, 8 ), new THREE.MeshBasicMaterial( { color: 0x00eecf} ) );
+			spherePlayHead.name = "spherePlayHead";
+
+
+			currentlyBeingPlayed = undefined; 
+			count = 0; 
+            var i, n_sub, container;
+
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
+            cameraFollow = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 1, 400);
+            cameraFollow.position.x =0; 
+            cameraFollow.position.y =0; 
+            cameraFollow.position.z =50;
+            cameraFollowHelper = new THREE.CameraHelper( cameraFollow );
+            //cameraFollowHelper.visible = false;
+            camera.position.z = 700;
+			activeCamera = camera; 
+			
+            scene = new THREE.Scene();
+            //scene.add(cameraFollowHelper); 
+
+			cameraRig = new THREE.Object3D();
+			cameraRig.add( cameraFollow );
+			scene.add(cameraRig); 
+			
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                alpha: true
+            });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            container.appendChild(renderer.domElement);
+
+
+            // convert incoming flat list into a list of splines
+            material = new THREE.MeshDepthMaterial( { overdraw: 0.5 } );
+
+			parentTransform = new THREE.Object3D();
+            for (var j = 0; j < myArr.curves.length; j++) {
+                var points = [];
+                var rawArrayofPoints = myArr.curves[j].points;
+                for (i = 0; i < rawArrayofPoints.length; i += 3) {
+                    var threeVector = new THREE.Vector3(rawArrayofPoints[i], rawArrayofPoints[i + 1], rawArrayofPoints[i + 2])
+                    points.push(threeVector);
+                }
+
+
+
+                var geometry = new THREE.Geometry(),
+
+                    //points = hilbert3D( new THREE.Vector3( 0,0,0 ), 200.0, 1, 0, 1, 2, 3, 4, 5, 6, 7 ),
+                    colors = [],
+                    colors2 = [],
+                    colors3 = [];
+
+                n_sub = 9;
+                var position, index;
+
+                var spline = new THREE.Spline(points);
+
+                for (i = 0; i < points.length * n_sub; i++) {
+
+                    index = i / (points.length * n_sub);
+                    position = spline.getPoint(index);
+
+                    geometry.vertices[i] = new THREE.Vector3(position.x, position.y, position.z);
+
+                    colors[i] = new THREE.Color(0xffff00);
+                    //colors[i].setHSL(0.6,1.0,1.0);
+
+                    colors2[i] = new THREE.Color(0xe9b8b8);
+                    //colors2[i].setHSL(0.9, 1.0, Math.max(0, -position.y / 200) + 0.5);
+
+                    colors3[i] = new THREE.Color(0xffffff, .3);
+                    colors3[i].setHSL(i / (points.length * n_sub), 1.0, .9);
+                }
+
+
+
+                geometry.colors = colors2;
+
+
+                // lines
+
+                material = new THREE.LineBasicMaterial({
+                    color: 0xffffff,
+                    opacity: 1,
+                    linewidth: 1,
+                    vertexColors: THREE.VertexColors
+                });
+
+                var line, p, scale = 3,
+                    d = 0;
+                var parameters = [
+                    [material, scale * 1.5, [d, 0, 0], geometry],
+
+                ];
+
+                console.log("param: " + parameters.length);
+                for (i = 0; i < parameters.length; ++i) {
+
+                    p = parameters[i];
+                    line = new THREE.Line(p[3], p[0]);
+                    line.scale.x = line.scale.y = line.scale.z = p[1];
+                    line.position.x = p[2][0];
+                    line.position.y = p[2][1];
+                    line.position.z = p[2][2];
+                    parentTransform.add(line);
+                }
+            }
+            
+            parentTransform.rotation.x = -1.5;
+			parentTransform.rotation.z = -.5;
+
+            scene.add( parentTransform );
+
+            raycaster = new THREE.Raycaster();
+            raycaster.linePrecision = 1;
+
+            stats = new Stats();
+            stats.domElement.style.position = 'absolute';
+            stats.domElement.style.top = '0px';
+            //container.appendChild(stats.domElement);
+
+
+            document.addEventListener('mousemove', onDocumentMouseMove, false);
+            document.addEventListener('touchstart', onDocumentTouchStart, false);
+            document.addEventListener('touchmove', onDocumentTouchMove, false);
+			document.addEventListener('mouseup', onDocumentMouseUp, false);
+            //
+
+            window.addEventListener('resize', onWindowResize, false);
+
+        }
+
+function removeEntity(object) {
+    var selectedObject = scene.getObjectByName(object.name);
+    scene.remove( selectedObject );
+    animate();
+}
+
+
+        function onWindowResize() {
+
+            windowHalfX = window.innerWidth / 2;
+            windowHalfY = window.innerHeight / 2;
+
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            
+			cameraFollow.aspect = window.innerWidth / window.innerHeight;
+            cameraFollow.updateProjectionMatrix();
+            
+            cameraFollowHelper.update();
+			cameraFollowHelper.visible = false;
+                    	
+            
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+        }
+
+        //
+
+        function onDocumentMouseMove(event) {
+	console.log("something");
+            mouseX = event.clientX - windowHalfX;
+            mouseY = event.clientY - windowHalfY;
+            mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+			mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+        }
+
+        function onDocumentTouchStart(event) {
+
+            if (event.touches.length > 1) {
+
+                event.preventDefault();
+
+                mouseX = event.touches[0].pageX - windowHalfX;
+                mouseY = event.touches[0].pageY - windowHalfY;
+            }
+        }
+
+        function onDocumentTouchMove(event) {
+
+            if (event.touches.length == 1) {
+
+                event.preventDefault();
+				console.log("Clicked?");
+                mouseX = event.touches[0].pageX - windowHalfX;
+                mouseY = event.touches[0].pageY - windowHalfY;
+            }
+
+        }
+        
+        
+        function fadeColor ( line , time){
+			stopSetInterval = setInterval(function(){ fadeColorHelper()}, 10);
+        } 
+        
+        
+        function fadeColorHelper(){
+        
+        } 
+        
+        function moveColor(){
+        if (count< currentlyBeingPlayed.geometry.colors.length - 1){
+        				currentlyBeingPlayed.geometry.colors[count].setRGB(0,238,207);
+                    	currentlyBeingPlayed.geometry.colorsNeedUpdate = true; 
+                    	count++;
+                    	
+                    	//new THREE.Vector3(
+                    	
+                    	var scaledPositionVector = scaledCurrentlyBeingPlayed.geometry.vertices[count].clone();
+                    	scaledPositionVector.applyMatrix4(scaledCurrentlyBeingPlayed.matrixWorld );
+                    	
+                    	cameraFollow.position.x = scaledPositionVector.x  ;
+                    	cameraFollow.position.y = scaledPositionVector.y ;
+                    	cameraFollow.position.z = scaledPositionVector.z ;
+                    	
+                    	var scaledVector = currentlyBeingPlayed.geometry.vertices[count].clone();
+                    	
+                    	scaledVector.applyMatrix4( currentlyBeingPlayed.matrixWorld );
+                    	
+                    	var scaledVectorBehind = scaledVector;
+                    	
+                    	if(count > 19){
+                    		scaledVectorBehind = currentlyBeingPlayed.geometry.vertices[count - 20 ].clone();
+                    		scaledVectorBehind.applyMatrix4( currentlyBeingPlayed.matrixWorld );
+                    	}
+                    	
+                    	
+                    	
+                    	
+                    	cameraFollow.lookAt(scaledVector);
+                    	
+                    	spherePlayHead.position.y = scaledVector.y; 
+                    	spherePlayHead.position.z = scaledVector.z; 
+                    	spherePlayHead.position.x = scaledVector.x; 
+                    	
+                    	//cameraRig.lookAt(scaledVector.x, scaledVector.y, scaledVector.z);
+                    	//cameraRig.lookAt(scaledVector);
+                    	//cameraRig.lookAt(currentlyBeingPlayed.geometry.vertices[count + 20]);
+                    	cameraFollow.updateProjectionMatrix();
+
+						cameraFollowHelper.update();
+						//cameraFollowHelper.visible = true;
+                    	//console.log(cameraFollow);
+                    	//camera.lookAt(camera.scenePosition);
+                    	//camera.lookAt(scene.position);
+        			}
+        			else{
+        				currentAudio.pause();
+        				removeEntity(scaledCurrentlyBeingPlayed);
+        				removeEntity(spherePlayHead);
+        				activeCamera = camera; 
+        				cameraFollowHelper.visible = false;
+        				count = 0; 
+        				currentlyBeingPlayed = undefined;
+        				clearInterval(stopSetInterval); 
+        			}
+        }
+        
+        function onDocumentMouseUp(event) {
+        console.log("clickzz");
+        	if ( currentIntersected !== undefined ) {
+        		console.log("click");
+        		//currentIntersected.material.color = 0x0099FF;
+        		console.log(currentIntersected);
+        		//console.log(currentIntersected.geometry.colors);
+        		//currentlyBeingPlayed, stopSetInterval
+        		
+        		
+        		var count = 0; 
+        		if(currentlyBeingPlayed == undefined){
+        			scene.add(spherePlayHead);
+        			currentlyBeingPlayed = currentIntersected;
+        			console.log(currentlyBeingPlayed.scale);
+        			
+        			scaledCurrentlyBeingPlayed = currentlyBeingPlayed.clone();        			
+        			scaledCurrentlyBeingPlayed.scale.x = 10; 
+        			scaledCurrentlyBeingPlayed.scale.y = 10; 
+        			scaledCurrentlyBeingPlayed.scale.z = 10; 
+        			
+        			scaledCurrentlyBeingPlayed.rotation.x = -1.5;
+					scaledCurrentlyBeingPlayed.rotation.z = -.5;
+					
+					console.log(scaledCurrentlyBeingPlayed);
+					scaledCurrentlyBeingPlayed.visible=false;
+        			scene.add(scaledCurrentlyBeingPlayed);
+        			activeCamera = cameraFollow;  
+        			cameraFollowHelper.visible = false;
+        			var rand = getRandomInt(0,3);
+        			console.log(rand); 
+        			currentAudio = allAudio[rand]; 
+        			console.log(currentAudio); 
+        			currentAudio.play();
+        			stopSetInterval = setInterval(function(){ moveColor()}, 10);
+        		 }
+        		 /*
+        		for (var i=0; i < currentIntersected.geometry.colors.length; i++){
+        		
+        			currentIntersected.geometry.colors[i] = new THREE.Color(0xffffff, .3);
+                    currentIntersected.geometry.colors[i].setRGB(255,0,0);
+                    currentIntersected.geometry.colorsNeedUpdate = true; 
+        		}
+        		*/ 
+        		//console.log(currentIntersected.geometry.colors);
+        		//console.log(currentIntersected.geometry.colorsNeedUpdate);
+        	}
+        }
+        
+
+        //
+
+        function animate() {
+
+            requestAnimationFrame(animate);
+            render();
+
+        }
+
+        function render() {
+
+
+            camera.position.x += (mouseX - camera.position.x) * .05;
+           camera.position.y += (-mouseY + 200 - camera.position.y) * .05;
+
+            camera.lookAt(scene.position);
+
+
+            raycaster.setFromCamera(mouse, camera);
+
+            var intersects = raycaster.intersectObjects( parentTransform.children , true);
+
+            if ( intersects.length > 0 ) {
+					
+					if ( currentIntersected !== undefined ) {
+
+						currentIntersected.material.linewidth = 1;
+						
+
+					}
+
+					currentIntersected = intersects[ 0 ].object;
+					currentIntersected.material.linewidth = 10; 
+
+					//sphereInter.visible = true;
+					//sphereInter.position.copy( intersects[ 0 ].point );
+
+				} else {
+
+					if ( currentIntersected !== undefined ) {
+
+						currentIntersected.material.linewidth = 1;
+
+					}
+
+					currentIntersected = undefined;
+
+					//sphereInter.visible = false;
+
+				}
+            renderer.setClearColor(0xffffff, 1);
+            renderer.render(scene, activeCamera);
+
+        }
+        
+        function getRandomInt(min, max) {
+  			return Math.floor(Math.random() * (max - min)) + min;
+		}
+    </script>
+</body>
+
+</html>
